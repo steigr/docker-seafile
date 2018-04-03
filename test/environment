@@ -1,0 +1,21 @@
+#!sh
+# trace shell commands during setup
+# TRACE=1
+
+# Seafile Server Setup
+# name of the server
+SEAFILE_SERVER_NAME=example
+# ip address
+SEAFILE_IP_OR_DOMAIN=127.0.0.1
+# Webfrontend
+SEAFILE_WEBSERVER_PORT=8000
+# Fileserver
+SEAFILE_FILESERVER_PORT=8082
+# where to put all assets
+SEAFILE_DATA_DIR=/seafile
+# eMail of first administrator
+SEAFILE_ADMIN_EMAIL=admin@example.com
+# An the password
+SEAFILE_ADMIN_PASSWORD=changeme
+# Where is the seafile server dist (either file or URL)
+SEAFILE_SERVER_URL=/dist/seafile-server.tar.gz

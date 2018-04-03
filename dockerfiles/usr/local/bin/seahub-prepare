@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+[[ -z "$TRACE" ]] || set -x
+
+SEAFILE_DIST_DIR="$1"
+
+panic() {
+    echo "$*"
+    exit 1
+}
+
+[[ -f "$SEAFILE_DIST_DIR/runtime/seahub.conf" ]] || panic "seahub.conf not found in $SEAFILE_DIST_DIR/runtime"
+
+sed '/daemon = True/d' -i "$SEAFILE_DIST_DIR/runtime/seahub.conf"
+sed '/log =/d' -i "$SEAFILE_DIST_DIR/runtime/seahub.conf"
+
+echo "accesslog = '-'" >> "$SEAFILE_DIST_DIR/runtime/seahub.conf"
+echo "errorlog  = '-'" >> "$SEAFILE_DIST_DIR/runtime/seahub.conf"
+
+[[ -f "$SEAFILE_DIST_DIR/seahub.sh" ]] || panic "seahub.sh not found in $SEAFILE_DIST_DIR"
+
+
+[[ -f "${SEAFILE_DATA_DIR}/conf/admin.txt" ]] \
+|| printf '{"email":"%s","password":"%s"}' "$SEAFILE_ADMIN_EMAIL" "$SEAFILE_ADMIN_PASSWORD" \
+   | install -D -m 0600 /dev/stdin "${SEAFILE_DATA_DIR}/conf/admin.txt"
+
+fgrep -q 'exec $PYTHON' "$SEAFILE_DIST_DIR/seahub.sh" || sed -e 's|\(\$PYTHON \$gunicorn_exe\)|exec \1|' -i "$SEAFILE_DIST_DIR/seahub.sh"
+
+cat <<EO_SEAHUB_SVR | install -D -m 0644 /dev/stdin /etc/supervisor/conf.d/seahub.conf
+[program:seahub]
+command="$SEAFILE_DIST_DIR/seahub.sh" start "${SEAFILE_WEBSERVER_PORT:-8000}"
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+EO_SEAHUB_SVR
+
+supervisorctl reread || true

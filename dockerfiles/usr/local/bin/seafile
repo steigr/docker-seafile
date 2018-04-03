@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+
+[[ -z "$TRACE" ]] || set -x
+
+pidof tini >/dev/null </dev/null 2>/dev/null || exec "tini" -- "$0" "${@}"
+
+case "$*" in
+    seahub|seafile)
+        true
+    ;;
+    *)
+        exec "${@}"
+    ;;
+esac
+
+set -- supervisord -n
+
+panic() {
+    echo "$*"
+    exit 1
+}
+
+[[ "$SEAFILE_SERVER_URL" ]] || panic '$SEAFILE_SERVER_URL is not specified'
+
+download_seafile() {
+    [[ ! -e "seafile-server-latest/seafile.sh" ]] || return 0
+    echo "$SEAFILE_SERVER_URL" | grep '&dl=1$' || SEAFILE_SERVER_URL="$SEAFILE_SERVER_URL&dl=1"
+    curl -L "$SEAFILE_SERVER_URL" | tar xz
+}
+
+extract_seafile() {
+    [[ ! -e "seafile-server-latest/seafile.sh" ]] || return 0
+    tar xf "$SEAFILE_SERVER_URL"
+}
+
+mkdir -p "${SEAFILE_DATA_DIR}/data"
+cd "${SEAFILE_DATA_DIR}"
+
+[[ -e "$SEAFILE_SERVER_URL" ]] \
+&& extract_seafile \
+|| download_seafile
+
+export SEAFILE_DIST_DIR="$(ls -d seafile-* | grep pro-server | xargs -n1 realpath | head -1)"
+
+# use distributed libpython2.7 to avoid hacky LD_LIBRARY_PATHs
+install_lib() {
+    find $SEAFILE_DIST_DIR -name "$1" -print0 \
+    | xargs -n1 -0 -I{} ${TRACE:+-t} -r realpath -z '{}' \
+    | xargs -n1 -0 -I{} ${TRACE:+-t} -r cp '{}' "/usr/lib/$1"
+    ldconfig
+}
+
+seafile_setup() {
+    cat <<EO_SETUP
+exec >/proc/1/fd/1 2>/proc/1/fd/2
+$( [[ -z "$TRACE" ]] || echo set -x)
+echo "Setup Seafile"
+
+hook_seafile() {
+    cd "${SEAFILE_DATA_DIR}/data"
+    seafile-prepare "$SEAFILE_DIST_DIR"
+    supervisorctl add seafile
+    until supervisorctl status seafile 2>/dev/null | grep -q RUNNING; do sleep .2; done
+}
+
+hook_seahub() {
+    cd "${SEAFILE_DATA_DIR}/data"
+    SEAFILE_WEBSERVER_PORT="${SEAFILE_WEBSERVER_PORT:-8000}" seahub-prepare "$SEAFILE_DIST_DIR"
+    supervisorctl add seahub
+    until supervisorctl status seahub 2>/dev/null | grep -q RUNNING; do sleep .2; done
+}
+
+# give supervisor some time to start
+until supervisorctl pid 2>/dev/null; do sleep .2; done 
+hook_seafile
+hook_seahub
+
+exit 0
+EO_SETUP
+}
+
+install_lib "libpython2.7.so.1.0"
+
+export PATH="$PATH:$SEAFILE_DIST_DIR"
+
+[[ "${LANG}" = "en_US.UTF-8" ]] || locale-gen "${LANG}"
+
+start-stop-daemon -S -b -n seafile-setup -x "$(command -v bash)" -- -c "$(seafile_setup)" </dev/null >/dev/null 2>/dev/null
+
+exec "${@}"
+
